@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maptap Flat — the flat-earther edition</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --ink: #e9eef7;
+    --dim: #8a93a8;
+    --land: #e6d7a8;
+    --landStroke: #b29d63;
+    --grid: rgba(255,255,255,0.06);
+    --accent: #ffd166;
+    --good: #4ade80;
+    --disc: #0f2a54;
+    --glass: rgba(8,18,44,0.82);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100svh;
+    overflow: hidden;
+    background: radial-gradient(ellipse at top, #162448 0%, var(--bg) 60%);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ──────────────────────────────────────────── */
+  header {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.3px; }
+  header h1 .tag { color: var(--accent); font-weight: 700; }
+  header .meta { font-size: 12px; color: var(--dim); }
+
+  /* ── Main area: flex column, everything fits ─────────── */
+  main {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    overflow: hidden;
+  }
+
+  /* ── Stats row ───────────────────────────────────────── */
+  .stats {
+    flex-shrink: 0;
+    display: flex; gap: 20px;
+    font-size: 13px; color: var(--dim);
+  }
+  .stats b { color: var(--ink); font-weight: 600; }
+
+  /* ── City prompt ─────────────────────────────────────── */
+  .prompt {
+    flex-shrink: 0;
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 14px; min-height: 36px;
+  }
+  .prompt .find { color: var(--dim); }
+  .prompt .city {
+    font-size: 24px; font-weight: 700;
+    color: var(--accent); letter-spacing: 0.2px;
+  }
+
+  /* City name fade-in when a new round starts */
+  @keyframes cityIn {
+    from { opacity: 0; transform: translateY(7px) scale(0.96); }
+    to   { opacity: 1; transform: none; }
+  }
+  .city.entering { animation: cityIn 0.45s cubic-bezier(0.16,1,0.3,1) both; }
+
+  /* ── The disc board ──────────────────────────────────── */
+  .board {
+    position: relative;
+    flex-shrink: 1;
+    /* Fit the disc inside whatever vertical + horizontal space is left.
+       The magic: min of 92vw, the remaining vertical room, and a hard cap. */
+    width: min(92vw, calc(100svh - 175px), 760px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    box-shadow: 0 16px 50px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.06);
+  }
+  svg {
+    width: 100%; height: 100%; display: block;
+    cursor: crosshair;
+    /* Clip SVG visually to the circle via the board's border-radius */
+    border-radius: 50%;
+    overflow: hidden;
+  }
+
+  /* SVG element styles */
+  .disc { fill: var(--disc); stroke: rgba(255,255,255,0.22); stroke-width: 1.2; }
+  .land { fill: var(--land); stroke: var(--landStroke); stroke-width: 0.5; }
+  .graticule { fill: none; stroke: var(--grid); stroke-width: 0.6; }
+  .antarctic-ring { fill: none; stroke: rgba(255,255,255,0.12); stroke-width: 1; stroke-dasharray: 2 4; }
+  .guess { fill: #fff; stroke: #000; stroke-width: 1.5; }
+  .target { fill: var(--good); stroke: #042f15; stroke-width: 1.5; }
+  .result-line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; }
+  .map-label {
+    font-size: 12px; font-weight: 700; fill: #fff;
+    paint-order: stroke; stroke: #000; stroke-width: 3.5; stroke-linejoin: round;
+    pointer-events: none;
+  }
+
+  /* ── Result toast — floats inside the bottom of the disc ─ */
+  .result-toast {
+    position: absolute;
+    bottom: 9%;
+    left: 50%; transform: translateX(-50%);
+    background: var(--glass);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 14px;
+    padding: 10px 22px 8px;
+    text-align: center;
+    min-width: 200px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .result-toast.visible { opacity: 1; }
+  .result-toast .score-line {
+    font-size: 22px; font-weight: 800; color: var(--accent);
+    line-height: 1;
+  }
+  .result-toast .dist-line {
+    font-size: 12px; color: var(--dim); margin-top: 3px;
+  }
+  .result-toast .dist-line b { color: var(--ink); }
+
+  /* Countdown progress bar */
+  .countdown-track {
+    height: 3px; background: rgba(255,255,255,0.12);
+    border-radius: 3px; overflow: hidden;
+    margin-top: 8px;
+  }
+  .countdown-fill {
+    height: 100%; width: 100%;
+    background: var(--accent);
+    transform-origin: left;
+  }
+  @keyframes countdownShrink {
+    from { width: 100%; }
+    to   { width: 0%; }
+  }
+  .countdown-fill.running {
+    animation: countdownShrink 2s linear forwards;
+  }
+
+  /* ── Final overlay — covers the whole disc ─────────────── */
+  .final-overlay {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background: rgba(8,15,38,0.88);
+    backdrop-filter: blur(6px);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px; text-align: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.4s ease;
+  }
+  .final-overlay.visible { opacity: 1; pointer-events: all; }
+  .final-overlay .total {
+    font-size: clamp(36px, 8vw, 52px); font-weight: 800; color: var(--accent);
+    line-height: 1;
+  }
+  .final-overlay .sub { color: var(--dim); font-size: 13px; }
+  .round-scores { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .round-scores span {
+    background: rgba(255,255,255,0.08);
+    padding: 5px 11px; border-radius: 8px;
+    font-weight: 600; font-size: 13px;
+  }
+  button {
+    background: var(--accent); color: #1a1200;
+    border: none; border-radius: 999px;
+    padding: 10px 22px; font-size: 14px; font-weight: 700;
+    cursor: pointer; letter-spacing: 0.3px;
+    transition: transform .08s ease, box-shadow .2s ease;
+  }
+  button:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(255,209,102,0.3); }
+
+  .loading {
+    position: absolute; inset: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: var(--dim);
+    background: var(--disc);
+  }
+
+  /* ── Footer hint ─────────────────────────────────────── */
+  footer {
+    flex-shrink: 0;
+    text-align: center; font-size: 11px; color: var(--dim);
+    padding: 5px 20px 8px;
+  }
+  footer a { color: var(--dim); }
+
+  /* Zoom hint */
+  .zoom-hint {
+    position: absolute; top: 8%; right: 7%;
+    font-size: 11px; color: rgba(255,255,255,0.35);
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Maptap <span class="tag">Flat</span> — the flat-earther edition</h1>
+  <div class="meta">azimuthal equidistant · UN-logo projection</div>
+</header>
+
+<main>
+  <div class="stats">
+    <div>Round <b id="round-num">1</b> / 5</div>
+    <div>Score <b id="score-total">0</b></div>
+  </div>
+
+  <div class="prompt" id="prompt">
+    <span class="find">Find:</span>
+    <span class="city" id="city-name">—</span>
+  </div>
+
+  <div class="board" id="board">
+    <svg id="map" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid meet"></svg>
+
+    <!-- Result toast: floats inside bottom of disc -->
+    <div class="result-toast" id="result-toast">
+      <div class="score-line">+<span id="round-score">0</span></div>
+      <div class="dist-line">Off by <b id="dist-readout">—</b> disc-units</div>
+      <div class="countdown-track">
+        <div class="countdown-fill" id="countdown-fill"></div>
+      </div>
+    </div>
+
+    <!-- Final overlay: covers whole disc -->
+    <div class="final-overlay" id="final-overlay">
+      <div class="sub">Final score</div>
+      <div class="total"><span id="final-total">0</span> <span style="font-size:0.5em;color:var(--dim)">/ 500</span></div>
+      <div class="round-scores" id="round-breakdown"></div>
+      <button id="restart-btn">Play again</button>
+    </div>
+
+    <!-- Loading placeholder -->
+    <div class="loading" id="loading">Loading map…</div>
+
+    <!-- Zoom level indicator -->
+    <div class="zoom-hint" id="zoom-hint">1×</div>
+  </div>
+</main>
+
+<footer>
+  Tribute to <a href="https://maptap.gg" target="_blank">maptap.gg</a>. Distances on the flat disc. Scroll/pinch to zoom.
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<script src="cities.js"></script>
+<script>
+(function () {
+  const WIDTH = 800, HEIGHT = 800;
+  const CX = WIDTH / 2, CY = HEIGHT / 2;
+  const DISC_RADIUS = 380;
+
+  // ── Projection: azimuthal equidistant centered on North Pole ──────────────
+  const projection = d3.geoAzimuthalEquidistant()
+    .rotate([0, -90])
+    .translate([CX, CY])
+    .scale(DISC_RADIUS / Math.PI)
+    .clipAngle(180 - 1e-3);
+
+  const path = d3.geoPath(projection);
+  const svg = d3.select("#map");
+
+  // Disc background (outside zoom group — doesn't move or scale with pan/zoom)
+  svg.append("circle")
+    .attr("class", "disc")
+    .attr("cx", CX).attr("cy", CY).attr("r", DISC_RADIUS);
+
+  // Zoom group — all map content lives here.
+  // The SVG's border-radius + overflow:hidden on svg clips it visually.
+  const zoomG = svg.append("g").attr("id", "zoom-group");
+
+  // Graticule
+  const graticule = d3.geoGraticule().step([15, 15]);
+  zoomG.append("path").datum(graticule()).attr("class", "graticule").attr("d", path);
+
+  // Antarctic "ice wall" ring
+  zoomG.append("circle")
+    .attr("class", "antarctic-ring")
+    .attr("cx", CX).attr("cy", CY).attr("r", DISC_RADIUS - 2);
+
+  // Overlay group (markers, lines, labels) — also inside zoomG so it zooms too
+  const overlay = zoomG.append("g").attr("id", "overlay");
+
+  // Hit circle — transparent disc covering the SVG, catches all clicks.
+  // Lives OUTSIDE zoomG so it always covers the full SVG in screen space.
+  const hit = svg.append("circle")
+    .attr("cx", CX).attr("cy", CY).attr("r", DISC_RADIUS)
+    .attr("fill", "transparent")
+    .style("cursor", "crosshair")
+    .style("pointer-events", "none");
+
+  // ── Zoom ─────────────────────────────────────────────────────────────────
+  // scaleExtent [1, 8]: max zoom 8× — "twice" a natural 4× cap, very useful
+  // for checking placement of small countries on the disc.
+  let currentTransform = d3.zoomIdentity;
+
+  const zoom = d3.zoom()
+    .scaleExtent([1, 8])
+    .translateExtent([
+      [CX - DISC_RADIUS, CY - DISC_RADIUS],
+      [CX + DISC_RADIUS, CY + DISC_RADIUS]
+    ])
+    .on("zoom", function (event) {
+      currentTransform = event.transform;
+      zoomG.attr("transform", event.transform.toString());
+      // Update zoom indicator
+      const z = event.transform.k;
+      document.getElementById("zoom-hint").textContent =
+        z === 1 ? "" : z.toFixed(1) + "×";
+    });
+
+  svg.call(zoom);
+
+  // ── Game state ────────────────────────────────────────────────────────────
+  const NUM_ROUNDS = 5;
+  const MAX_ROUND_SCORE = 100;
+  let state = null;
+  let autoTimer = null;
+
+  function newGame() {
+    const pool = CITIES.slice();
+    const picks = [];
+    for (let i = 0; i < NUM_ROUNDS; i++) {
+      const idx = Math.floor(Math.random() * pool.length);
+      picks.push(pool.splice(idx, 1)[0]);
+    }
+    return { cities: picks, round: 0, scores: [], roundResolved: false };
+  }
+
+  function startRound() {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+
+    overlay.selectAll("*").remove();
+
+    // Hide overlays
+    document.getElementById("result-toast").classList.remove("visible");
+    document.getElementById("final-overlay").classList.remove("visible");
+
+    // Update stats
+    document.getElementById("round-num").textContent = String(state.round + 1);
+    document.getElementById("score-total").textContent = String(state.scores.reduce((a,b)=>a+b, 0));
+
+    // Animate city name in
+    const cityEl = document.getElementById("city-name");
+    cityEl.classList.remove("entering");
+    void cityEl.offsetWidth; // force reflow to restart animation
+    cityEl.textContent = state.cities[state.round].name;
+    cityEl.classList.add("entering");
+
+    state.roundResolved = false;
+    hit.style("pointer-events", "all");
+
+    // Reset zoom to default on new round for clean slate
+    svg.transition().duration(400).call(zoom.transform, d3.zoomIdentity);
+  }
+
+  function resolveRound(mapX, mapY) {
+    if (state.roundResolved) return;
+    state.roundResolved = true;
+    hit.style("pointer-events", "none");
+
+    const city = state.cities[state.round];
+    const projected = projection([city.lon, city.lat]);
+    if (!projected) { nextOrFinish(); return; }
+    const [tx, ty] = projected;
+
+    // Flat-disc Euclidean distance in SVG coordinate space
+    const dist = Math.hypot(mapX - tx, mapY - ty);
+    const distUnits = dist / DISC_RADIUS;
+
+    const score = Math.max(0, Math.round(
+      MAX_ROUND_SCORE * Math.exp(-dist / (DISC_RADIUS * 0.36))
+    ));
+    state.scores.push(score);
+
+    // Draw result markers in map (zoom) coordinate space
+    overlay.append("line").attr("class", "result-line")
+      .attr("x1", mapX).attr("y1", mapY)
+      .attr("x2", tx).attr("y2", ty);
+    overlay.append("circle").attr("class", "guess")
+      .attr("cx", mapX).attr("cy", mapY).attr("r", 6);
+    overlay.append("circle").attr("class", "target")
+      .attr("cx", tx).attr("cy", ty).attr("r", 7);
+    overlay.append("text").attr("class", "map-label")
+      .attr("x", tx + 10).attr("y", ty - 10)
+      .text(city.name);
+
+    // Update and show result toast
+    document.getElementById("dist-readout").textContent = distUnits.toFixed(2);
+    document.getElementById("round-score").textContent = String(score);
+    document.getElementById("score-total").textContent = String(state.scores.reduce((a,b)=>a+b, 0));
+
+    const toast = document.getElementById("result-toast");
+    toast.classList.add("visible");
+
+    // Animate countdown bar
+    const fill = document.getElementById("countdown-fill");
+    fill.classList.remove("running");
+    void fill.offsetWidth;
+    fill.classList.add("running");
+
+    // Auto-advance after 2 s
+    autoTimer = setTimeout(function () {
+      autoTimer = null;
+      nextOrFinish();
+    }, 2000);
+  }
+
+  function nextOrFinish() {
+    if (state.round + 1 >= NUM_ROUNDS) {
+      showFinal();
+    } else {
+      state.round++;
+      startRound();
+    }
+  }
+
+  function showFinal() {
+    document.getElementById("result-toast").classList.remove("visible");
+
+    const total = state.scores.reduce((a,b)=>a+b, 0);
+    document.getElementById("final-total").textContent = String(total);
+    const breakdown = document.getElementById("round-breakdown");
+    breakdown.innerHTML = "";
+    state.scores.forEach(function (s, i) {
+      const el = document.createElement("span");
+      el.textContent = "S" + (i+1) + ": " + s;
+      breakdown.appendChild(el);
+    });
+
+    document.getElementById("final-overlay").classList.add("visible");
+  }
+
+  // ── Click/tap handler ─────────────────────────────────────────────────────
+  hit.on("click", function (event) {
+    // Get pointer in SVG-viewport coordinates
+    const [sx, sy] = d3.pointer(event, svg.node());
+    // Invert the current zoom/pan transform to get map coordinates
+    const [mx, my] = currentTransform.invert([sx, sy]);
+    // Must be inside the disc (in map coordinates)
+    if (Math.hypot(mx - CX, my - CY) > DISC_RADIUS) return;
+    resolveRound(mx, my);
+  });
+
+  document.getElementById("restart-btn").addEventListener("click", function () {
+    state = newGame();
+    startRound();
+  });
+
+  // ── Load land data and start ───────────────────────────────────────────────
+  fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json")
+    .then(function (r) { return r.json(); })
+    .then(function (land) {
+      const landFeature = topojson.feature(land, land.objects.land);
+      // Insert land layer before overlay (so markers appear on top)
+      zoomG.insert("path", "#overlay")
+        .datum(landFeature)
+        .attr("class", "land")
+        .attr("d", path);
+
+      document.getElementById("loading").style.display = "none";
+      state = newGame();
+      startRound();
+    })
+    .catch(function (err) {
+      document.getElementById("loading").textContent =
+        "Map needs internet. " + err.message;
+    });
+})();
+</script>
+</body>
+</html>
