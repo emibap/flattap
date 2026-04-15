@@ -132,6 +132,7 @@
     cursor: crosshair;
     border-radius: 50%;
     overflow: hidden;
+    touch-action: none; /* hand all touch events to JS (d3 + rotation) */
   }
   .disc         { fill: var(--disc); stroke: rgba(255,255,255,0.22); stroke-width: 1.2; }
   .land         { fill: var(--land); stroke: var(--landStroke); stroke-width: 0.5; }
@@ -682,9 +683,12 @@
     .attr('class', 'disc')
     .attr('cx', CX).attr('cy', CY).attr('r', DISC_RADIUS);
 
-  // Rotation wrapper — sits between the root SVG and the zoom group
-  const rotateG = svg.append('g').attr('id', 'rotate-group');
-  const zoomG   = rotateG.append('g').attr('id', 'zoom-group');
+  // zoomG is the outer group — d3.zoom pans/scales it in SVG space so
+  // dragging always moves the map in the direction you drag, regardless of rotation.
+  // rotateG is the inner group — rotation is applied here, so it only spins the
+  // map content without affecting the pan axes.
+  const zoomG   = svg.append('g').attr('id', 'zoom-group');
+  const rotateG = zoomG.append('g').attr('id', 'rotate-group');
 
   // Disc rotation state
   let discRotation = 0;
@@ -694,13 +698,13 @@
   }
 
   const graticule = d3.geoGraticule().step([15, 15]);
-  zoomG.append('path').datum(graticule()).attr('class', 'graticule').attr('d', path);
+  rotateG.append('path').datum(graticule()).attr('class', 'graticule').attr('d', path);
 
-  zoomG.append('circle')
+  rotateG.append('circle')
     .attr('class', 'antarctic-ring')
     .attr('cx', CX).attr('cy', CY).attr('r', DISC_RADIUS - 2);
 
-  const overlay = zoomG.append('g').attr('id', 'overlay');
+  const overlay = rotateG.append('g').attr('id', 'overlay');
 
   const hit = svg.append('circle')
     .attr('cx', CX).attr('cy', CY).attr('r', DISC_RADIUS)
@@ -1184,14 +1188,14 @@
   // ─────────────────────────────────────────────────────────────────
   hit.on('click', function(event) {
     const [sx, sy] = d3.pointer(event, svg.node());
-    // Un-rotate coordinates around the disc centre so they align with the
-    // unrotated projection, then un-zoom via the current d3 transform.
+    // Step 1: invert d3 zoom transform → coords in zoomG space
+    const [zx, zy] = currentTransform.invert([sx, sy]);
+    // Step 2: invert disc rotation around (CX,CY) → coords in map/projection space
     const rad = -discRotation * Math.PI / 180;
     const cos = Math.cos(rad), sin = Math.sin(rad);
-    const dx  = sx - CX, dy = sy - CY;
-    const rx  = dx * cos - dy * sin + CX;
-    const ry  = dx * sin + dy * cos + CY;
-    const [mx, my] = currentTransform.invert([rx, ry]);
+    const dx  = zx - CX, dy = zy - CY;
+    const mx  = dx * cos - dy * sin + CX;
+    const my  = dx * sin + dy * cos + CY;
     if (Math.hypot(mx - CX, my - CY) > DISC_RADIUS) return;
     resolveRound(mx, my);
   });
@@ -1200,7 +1204,6 @@
   // 2-FINGER ROTATION (touch) + ROTATE BUTTONS (desktop)
   // ─────────────────────────────────────────────────────────────────
   (function() {
-    var svgNode = document.getElementById('map');
     var lastAngle = null;
 
     function touchAngle(touches) {
@@ -1208,12 +1211,17 @@
       return Math.atan2(t1.clientY - t0.clientY, t1.clientX - t0.clientX) * 180 / Math.PI;
     }
 
-    svgNode.addEventListener('touchstart', function(e) {
+    // touchstart on the SVG: capture initial angle when 2 fingers land
+    document.getElementById('map').addEventListener('touchstart', function(e) {
       lastAngle = e.touches.length === 2 ? touchAngle(e.touches) : null;
     }, { passive: true });
 
-    svgNode.addEventListener('touchmove', function(e) {
-      if (e.touches.length !== 2 || lastAngle === null) return;
+    // touchmove on document: keeps working even if fingers drift outside the SVG.
+    // d3-zoom v7 also moves its own touchmove listener to window after gesture
+    // starts, so using document here runs in parallel without conflict.
+    document.addEventListener('touchmove', function(e) {
+      if (e.touches.length !== 2) { lastAngle = null; return; }
+      if (lastAngle === null) { lastAngle = touchAngle(e.touches); return; }
       var angle = touchAngle(e.touches);
       var delta = angle - lastAngle;
       if (delta >  180) delta -= 360;
@@ -1222,7 +1230,7 @@
       lastAngle = angle;
     }, { passive: true });
 
-    svgNode.addEventListener('touchend', function(e) {
+    document.addEventListener('touchend', function(e) {
       if (e.touches.length < 2) lastAngle = null;
     }, { passive: true });
 
@@ -1350,7 +1358,7 @@
     .then(function(r) { return r.json(); })
     .then(function(land) {
       const landFeature = topojson.feature(land, land.objects.land);
-      zoomG.insert('path', '#overlay')
+      rotateG.insert('path', '#overlay')
         .datum(landFeature)
         .attr('class', 'land')
         .attr('d', path);
