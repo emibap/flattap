@@ -1203,36 +1203,57 @@
   // ─────────────────────────────────────────────────────────────────
   // 2-FINGER ROTATION (touch) + ROTATE BUTTONS (desktop)
   // ─────────────────────────────────────────────────────────────────
+  //
+  // d3-zoom calls event.stopImmediatePropagation() on touchstart and
+  // touchmove via its internal noevent() helper.  This kills any
+  // listener registered in the normal (bubble / target) phase after
+  // d3-zoom's own listener.
+  //
+  // Fix: register our touch listeners on *document* in the CAPTURE
+  // phase.  Capture flows top-down (document → … → SVG), so our
+  // listener fires BEFORE d3-zoom's target-phase listener on the SVG
+  // can call stopImmediatePropagation.  d3-zoom's touchmove listener
+  // lives on window in the bubble phase, which fires even later.
+  // ─────────────────────────────────────────────────────────────────
   (function() {
     var lastAngle = null;
+    var board = document.getElementById('board');
 
-    function touchAngle(touches) {
-      var t0 = touches[0], t1 = touches[1];
+    function touchAngle(t0, t1) {
       return Math.atan2(t1.clientY - t0.clientY, t1.clientX - t0.clientX) * 180 / Math.PI;
     }
 
-    // touchstart on the SVG: capture initial angle when 2 fingers land
-    document.getElementById('map').addEventListener('touchstart', function(e) {
-      lastAngle = e.touches.length === 2 ? touchAngle(e.touches) : null;
-    }, { passive: true });
+    // Capture-phase touchstart: grab initial angle when 2 fingers land
+    // on the game board.
+    document.addEventListener('touchstart', function(e) {
+      if (!board.contains(e.target)) return;      // ignore taps outside disc
+      if (e.touches.length === 2) {
+        lastAngle = touchAngle(e.touches[0], e.touches[1]);
+      } else {
+        lastAngle = null;
+      }
+    }, { capture: true, passive: true });
 
-    // touchmove on document: keeps working even if fingers drift outside the SVG.
-    // d3-zoom v7 also moves its own touchmove listener to window after gesture
-    // starts, so using document here runs in parallel without conflict.
+    // Capture-phase touchmove: compute delta angle → rotate disc.
+    // Self-healing: if touchstart was missed (e.g. blocked by a
+    // future d3-zoom change), the first move captures the angle
+    // instead of dropping the frame.
     document.addEventListener('touchmove', function(e) {
       if (e.touches.length !== 2) { lastAngle = null; return; }
-      if (lastAngle === null) { lastAngle = touchAngle(e.touches); return; }
-      var angle = touchAngle(e.touches);
+      var angle = touchAngle(e.touches[0], e.touches[1]);
+      if (lastAngle === null) { lastAngle = angle; return; }
       var delta = angle - lastAngle;
       if (delta >  180) delta -= 360;
       if (delta < -180) delta += 360;
       applyDiscRotation(discRotation + delta);
       lastAngle = angle;
-    }, { passive: true });
+    }, { capture: true, passive: true });
 
+    // touchend is NOT blocked by d3-zoom (it lets it propagate for
+    // click-emulation), but capture phase is harmless and consistent.
     document.addEventListener('touchend', function(e) {
       if (e.touches.length < 2) lastAngle = null;
-    }, { passive: true });
+    }, { capture: true, passive: true });
 
     // Rotate buttons — step rotation for desktop users
     var STEP = 22.5; // degrees per button click
