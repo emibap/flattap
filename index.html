@@ -140,7 +140,7 @@
   .antarctic-ring { fill: none; stroke: rgba(255,255,255,0.12); stroke-width: 1; stroke-dasharray: 2 4; }
   .guess        { fill: #fff; stroke: #000; stroke-width: 1.5; }
   .target       { fill: var(--good); stroke: #042f15; stroke-width: 1.5; }
-  .result-line  { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; }
+  .result-line  { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
   .map-label {
     font-size: 12px; font-weight: 700; fill: #fff;
     paint-order: stroke; stroke: #000; stroke-width: 3.5; stroke-linejoin: round;
@@ -149,18 +149,20 @@
 
   /* ── Result toast ─────────────────────────────────────── */
   .result-toast {
-    position: absolute;
-    bottom: 9%; left: 50%; transform: translateX(-50%);
+    flex-shrink: 0;
+    align-self: center;
     background: var(--glass);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255,255,255,0.14);
     border-radius: 14px;
-    padding: 10px 22px 8px;
+    padding: 8px 22px 7px;
     text-align: center; min-width: 200px;
     pointer-events: none;
-    opacity: 0; transition: opacity 0.25s ease;
+    /* Reserve space always so board size never jumps */
+    visibility: hidden; opacity: 0;
+    transition: opacity 0.25s ease, visibility 0s linear 0.25s;
   }
-  .result-toast.visible { opacity: 1; }
+  .result-toast.visible { visibility: visible; opacity: 1; transition: opacity 0.25s ease, visibility 0s; }
   .result-toast .score-line {
     font-size: 24px; font-weight: 800; color: var(--accent); line-height: 1;
   }
@@ -354,15 +356,6 @@
   <div class="board" id="board">
     <svg id="map" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid meet"></svg>
 
-    <div class="result-toast" id="result-toast">
-      <div class="score-line" id="round-score-line">+<span id="round-score">0</span></div>
-      <div class="snarky-line" id="snarky-text"></div>
-      <div class="dist-line">Off by <b id="dist-readout">—</b></div>
-      <div class="countdown-track">
-        <div class="countdown-fill" id="countdown-fill"></div>
-      </div>
-    </div>
-
     <div class="final-overlay" id="final-overlay">
       <div class="grade-flavor" id="grade-flavor"></div>
       <div class="total"><span id="final-total">0</span></div>
@@ -383,6 +376,15 @@
 
     <div class="loading" id="loading">Loading map…</div>
     <div class="zoom-hint" id="zoom-hint"></div>
+  </div>
+
+  <div class="result-toast" id="result-toast">
+    <div class="score-line" id="round-score-line">+<span id="round-score">0</span></div>
+    <div class="snarky-line" id="snarky-text"></div>
+    <div class="dist-line">Off by <b id="dist-readout">—</b></div>
+    <div class="countdown-track">
+      <div class="countdown-fill" id="countdown-fill"></div>
+    </div>
   </div>
 
   <div class="practice-row">
@@ -726,8 +728,17 @@
     .on('zoom', function(event) {
       currentTransform = event.transform;
       zoomG.attr('transform', event.transform.toString());
-      const z = event.transform.k;
-      document.getElementById('zoom-hint').textContent = z === 1 ? '' : z.toFixed(1) + '×';
+      const k = event.transform.k;
+      document.getElementById('zoom-hint').textContent = k === 1 ? '' : k.toFixed(1) + '×';
+      // Keep markers at constant visual size regardless of zoom level
+      overlay.selectAll('.marker-dot')
+        .attr('r',            function() { return +this.getAttribute('data-r') / k; })
+        .style('stroke-width', function() { return 1.5 / k; });
+      overlay.selectAll('.marker-label')
+        .style('font-size',   function() { return 12 / k + 'px'; })
+        .style('stroke-width',function() { return 3.5 / k; })
+        .attr('x', function() { return +this.getAttribute('data-tx') + 10 / k; })
+        .attr('y', function() { return +this.getAttribute('data-ty') - 10 / k; });
     });
 
   svg.call(zoom);
@@ -1057,12 +1068,20 @@
     lineNode.transition().duration(550).ease(d3.easeLinear)
       .style('stroke-dashoffset', 0);
 
-    overlay.append('circle').attr('class', 'guess')
-      .attr('cx', mapX).attr('cy', mapY).attr('r', 6);
-    overlay.append('circle').attr('class', 'target')
-      .attr('cx', tx).attr('cy', ty).attr('r', 7);
-    overlay.append('text').attr('class', 'map-label')
-      .attr('x', tx + 10).attr('y', ty - 10)
+    const k = currentTransform.k;
+    overlay.append('circle').attr('class', 'guess marker-dot')
+      .attr('cx', mapX).attr('cy', mapY)
+      .attr('r', 6 / k).attr('data-r', 6)
+      .style('stroke-width', 1.5 / k);
+    overlay.append('circle').attr('class', 'target marker-dot')
+      .attr('cx', tx).attr('cy', ty)
+      .attr('r', 7 / k).attr('data-r', 7)
+      .style('stroke-width', 1.5 / k);
+    overlay.append('text').attr('class', 'map-label marker-label')
+      .attr('data-tx', tx).attr('data-ty', ty)
+      .attr('x', tx + 10 / k).attr('y', ty - 10 / k)
+      .style('font-size', 12 / k + 'px')
+      .style('stroke-width', 3.5 / k)
       .text(city.name);
 
     // ── Toast ─────────────────────────────────────────────────────
