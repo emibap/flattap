@@ -118,6 +118,24 @@
   }
   .city.entering { animation: cityIn 0.45s cubic-bezier(0.16,1,0.3,1) both; }
 
+  /* ── Disc intro animation ──────────────────────────────── */
+  /* TWEAK GUIDE:
+     - Duration:       change 1.8s in the animation shorthand (longer = slower overall)
+     - Scale start:    change scale(0.1) in the 0% keyframe (0.1 = 10%, 0.3 = 30%, etc.)
+     - Rotation total: change rotate(1080deg) — 1080 = 3 full spins, 720 = 2, 1440 = 4
+     - Fade speed:     the opacity reaches 1 at the 25% keyframe (lower % = faster fade)
+     - Easing:         cubic-bezier(0.0, 0.0, 0.2, 1) is a decelerate curve (fast→slow)
+                       try cubic-bezier(0.16, 1, 0.3, 1) for a snappier feel
+  */
+  @keyframes discIntro {
+    0%   { opacity: 0;   transform: scale(0.1) rotate(0deg); }
+    25%  { opacity: 1; }
+    100% { opacity: 1;   transform: scale(1)   rotate(1080deg); }
+  }
+  svg.intro-playing {
+    animation: discIntro 1.8s cubic-bezier(0.0, 0.0, 0.2, 1) both;
+  }
+
   /* ── The disc board ───────────────────────────────────── */
   .board {
     position: relative;
@@ -1404,6 +1422,15 @@
         .attr('d', path);
 
       document.getElementById('loading').style.display = 'none';
+
+      // Disc intro animation — add class, remove after it finishes
+      var mapEl = document.getElementById('map');
+      mapEl.classList.add('intro-playing');
+      mapEl.addEventListener('animationend', function handler() {
+        mapEl.classList.remove('intro-playing');
+        mapEl.removeEventListener('animationend', handler);
+      });
+
       init();
     })
     .catch(function(err) {
