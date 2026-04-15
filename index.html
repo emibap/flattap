@@ -280,6 +280,38 @@
     pointer-events: none; font-variant-numeric: tabular-nums;
   }
 
+  /* ── Rotate buttons (desktop only) ──────────────────────── */
+  .rotate-btn {
+    display: none; /* shown via media query below */
+    position: absolute; top: 7%;
+    width: 38px; height: 38px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 50%;
+    color: rgba(255,255,255,0.7);
+    font-size: 18px; line-height: 1;
+    cursor: pointer; z-index: 10;
+    align-items: center; justify-content: center;
+    padding: 0;
+    transition: background 0.15s, color 0.15s, transform 0.1s;
+    box-shadow: none;
+    user-select: none;
+  }
+  .rotate-btn:hover {
+    background: rgba(255,255,255,0.18);
+    color: #fff;
+    transform: none;
+    box-shadow: none;
+  }
+  .rotate-btn:active { transform: scale(0.9) !important; }
+  .rotate-btn-left  { left: 6%; }
+  .rotate-btn-right { right: 6%; }
+
+  /* Show rotate buttons on pointer-fine (mouse) devices */
+  @media (hover: hover) and (pointer: fine) {
+    .rotate-btn { display: flex; }
+  }
+
   footer {
     flex-shrink: 0;
     text-align: center; font-size: 11px; color: var(--dim);
@@ -345,6 +377,9 @@
       </div>
     </div>
 
+    <button class="rotate-btn rotate-btn-left"  id="btn-rotate-left"  title="Rotate disc left"  aria-label="Rotate disc left">↺</button>
+    <button class="rotate-btn rotate-btn-right" id="btn-rotate-right" title="Rotate disc right" aria-label="Rotate disc right">↻</button>
+
     <div class="loading" id="loading">Loading map…</div>
     <div class="zoom-hint" id="zoom-hint"></div>
   </div>
@@ -355,7 +390,7 @@
 </main>
 
 <footer>
-  Tribute to <a href="https://maptap.gg" target="_blank">maptap.gg</a> · flat-earth edition · scroll/pinch to zoom
+  Tribute to <a href="https://maptap.gg" target="_blank">maptap.gg</a> · flat-earth edition · scroll/pinch to zoom · 2-finger twist to rotate
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
@@ -647,7 +682,16 @@
     .attr('class', 'disc')
     .attr('cx', CX).attr('cy', CY).attr('r', DISC_RADIUS);
 
-  const zoomG = svg.append('g').attr('id', 'zoom-group');
+  // Rotation wrapper — sits between the root SVG and the zoom group
+  const rotateG = svg.append('g').attr('id', 'rotate-group');
+  const zoomG   = rotateG.append('g').attr('id', 'zoom-group');
+
+  // Disc rotation state
+  let discRotation = 0;
+  function applyDiscRotation(angle) {
+    discRotation = angle % 360;
+    rotateG.attr('transform', 'rotate(' + discRotation + ',' + CX + ',' + CY + ')');
+  }
 
   const graticule = d3.geoGraticule().step([15, 15]);
   zoomG.append('path').datum(graticule()).attr('class', 'graticule').attr('d', path);
@@ -670,7 +714,7 @@
   let currentTransform = d3.zoomIdentity;
 
   const zoom = d3.zoom()
-    .scaleExtent([1, 8])
+    .scaleExtent([1, 16])
     .translateExtent([
       [CX - DISC_RADIUS, CY - DISC_RADIUS],
       [CX + DISC_RADIUS, CY + DISC_RADIUS]
@@ -1140,10 +1184,76 @@
   // ─────────────────────────────────────────────────────────────────
   hit.on('click', function(event) {
     const [sx, sy] = d3.pointer(event, svg.node());
-    const [mx, my] = currentTransform.invert([sx, sy]);
+    // Un-rotate coordinates around the disc centre so they align with the
+    // unrotated projection, then un-zoom via the current d3 transform.
+    const rad = -discRotation * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const dx  = sx - CX, dy = sy - CY;
+    const rx  = dx * cos - dy * sin + CX;
+    const ry  = dx * sin + dy * cos + CY;
+    const [mx, my] = currentTransform.invert([rx, ry]);
     if (Math.hypot(mx - CX, my - CY) > DISC_RADIUS) return;
     resolveRound(mx, my);
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 2-FINGER ROTATION (touch) + ROTATE BUTTONS (desktop)
+  // ─────────────────────────────────────────────────────────────────
+  (function() {
+    var svgNode = document.getElementById('map');
+    var lastAngle = null;
+
+    function touchAngle(touches) {
+      var t0 = touches[0], t1 = touches[1];
+      return Math.atan2(t1.clientY - t0.clientY, t1.clientX - t0.clientX) * 180 / Math.PI;
+    }
+
+    svgNode.addEventListener('touchstart', function(e) {
+      lastAngle = e.touches.length === 2 ? touchAngle(e.touches) : null;
+    }, { passive: true });
+
+    svgNode.addEventListener('touchmove', function(e) {
+      if (e.touches.length !== 2 || lastAngle === null) return;
+      var angle = touchAngle(e.touches);
+      var delta = angle - lastAngle;
+      if (delta >  180) delta -= 360;
+      if (delta < -180) delta += 360;
+      applyDiscRotation(discRotation + delta);
+      lastAngle = angle;
+    }, { passive: true });
+
+    svgNode.addEventListener('touchend', function(e) {
+      if (e.touches.length < 2) lastAngle = null;
+    }, { passive: true });
+
+    // Rotate buttons — step rotation for desktop users
+    var STEP = 22.5; // degrees per button click
+    var rotateTimer = null;
+
+    function startRotate(dir) {
+      applyDiscRotation(discRotation + dir * STEP);
+      rotateTimer = setInterval(function() {
+        applyDiscRotation(discRotation + dir * STEP);
+      }, 120);
+    }
+    function stopRotate() {
+      clearInterval(rotateTimer);
+      rotateTimer = null;
+    }
+
+    ['mousedown','touchstart'].forEach(function(evName) {
+      document.getElementById('btn-rotate-left').addEventListener(evName, function(e) {
+        e.preventDefault(); startRotate(-1);
+      });
+      document.getElementById('btn-rotate-right').addEventListener(evName, function(e) {
+        e.preventDefault(); startRotate(1);
+      });
+    });
+    ['mouseup','mouseleave','touchend','touchcancel'].forEach(function(evName) {
+      document.getElementById('btn-rotate-left').addEventListener(evName, stopRotate);
+      document.getElementById('btn-rotate-right').addEventListener(evName, stopRotate);
+    });
+  }());
 
   // ─────────────────────────────────────────────────────────────────
   // SHARE
@@ -1236,7 +1346,7 @@
   // ─────────────────────────────────────────────────────────────────
   // LOAD MAP & START
   // ─────────────────────────────────────────────────────────────────
-  fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json')
+  fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json')
     .then(function(r) { return r.json(); })
     .then(function(land) {
       const landFeature = topojson.feature(land, land.objects.land);
